@@ -6,7 +6,7 @@ import gym
 
 class PolicyNetwork:
 
-    def __init__(self, env, state_dim = 4, act_dim = 2, horizon = 200, discount = 0.95):
+    def __init__(self, env, state_dim = 4, act_dim = 2, horizon = 500, discount = 0.95):
         self._env = env
         self._horizon = horizon
         self._act_dim = act_dim
@@ -29,7 +29,7 @@ class PolicyNetwork:
         self._log_pi = tf.log(self._pi)
 
 
-    def train(self, n_epochs, batch_size = 10, lr = 0.1, seed = 0, weight_save_path = None):
+    def train(self, n_epochs, batch_size = 10, lr = 0.1, seed = 0, weight_save_path = None, weight_load_path = None):
         self._saver = tf.train.Saver()
         self._sess = tf.Session()
         self._sess.run(tf.global_variables_initializer())
@@ -38,10 +38,14 @@ class PolicyNetwork:
         self._env.seed(seed)
         list_average_survival = []
 
+        if weight_load_path is not None:
+            self._saver.restore(self._sess, save_path = weight_load_path)
+            print("Weights loaded successfully.")
 
         for epoch in range(n_epochs):
             print("Epoch " + str(epoch))
             trajectory_batch_grad = []
+            batch_cum_sum_reward = []
             survival_list = []
             # Sample trajectories
             for batch in range(batch_size):
@@ -90,13 +94,41 @@ class PolicyNetwork:
                 print("survival " + str(survival_counter))
 
                 cum_sum_reward = (cum_sum_reward - np.mean(cum_sum_reward)) / np.std(cum_sum_reward)
-                trajectory_grad = np.array(trajectory_grad) * cum_sum_reward
+                batch_cum_sum_reward.append(cum_sum_reward)
+                trajectory_grad = np.array(trajectory_grad)
                 # print(trajectory_grad)
-                trajectory_grad = np.sum(trajectory_grad, axis = 0)
+                # trajectory_grad = np.sum(trajectory_grad, axis = 0)
                 trajectory_batch_grad.append(trajectory_grad)
 
+            mean_survive = np.mean(survival_list)
+            print("Average survival " + str(mean_survive))
+            list_average_survival.append(mean_survive)
+            if mean_survive == max(list_average_survival):
+                print("Average survival increases")
+                if weight_save_path is not None:
+                    save_path = self._saver.save(self._sess, save_path=weight_save_path)
+                    print("Model's weights saved at %s" % save_path)
+
+            if mean_survive > 200:
+                print("CartPole solved.")
+                return
+
             trajectory_batch_grad = np.array(trajectory_batch_grad)
-            trajectory_batch_grad = np.sum(trajectory_batch_grad, axis = 0) / batch_size
+            batch_cum_sum_reward = np.array(batch_cum_sum_reward)
+
+            # Computing the baseline:
+            numerator = np.sum(
+                self.array_map(lambda x: np.sum(x, axis = 0), trajectory_batch_grad * trajectory_batch_grad * batch_cum_sum_reward),
+                axis = 0)
+            denominator = np.sum(
+                self.array_map(lambda x: np.sum(x, axis = 0), trajectory_batch_grad * trajectory_batch_grad),
+                axis = 0)
+            baseline = numerator / (denominator + 1.e-8)
+            batch_cum_sum_reward = self.array_map(lambda x: x - baseline[None, :], batch_cum_sum_reward)
+            trajectory_batch_grad = trajectory_batch_grad * batch_cum_sum_reward
+            trajectory_batch_grad = self.array_map(lambda x: np.sum(x, axis = 0), trajectory_batch_grad)
+
+            trajectory_batch_grad = np.mean(trajectory_batch_grad, axis = 0)
             # print(trajectory_batch_grad)
             assign_W1 = self._W1.assign(self._W1 + lr * trajectory_batch_grad[0])
             assign_b1 = self._b1.assign(self._b1 + lr * trajectory_batch_grad[1])
@@ -107,18 +139,11 @@ class PolicyNetwork:
             self._sess.run(assigns)
 
             # weight_check = self._sess.run(self._weights)
-            mean_survive = np.mean(survival_list)
-            print("Average survival " + str(mean_survive))
-            list_average_survival.append(mean_survive)
-            if mean_survive == max(list_average_survival):
-                print("Average survival increases")
-                if weight_save_path is not None:
-                    save_path = self._saver.save(self._sess, save_path=weight_save_path)
-                    print("Model's weights saved at %s" % save_path)
 
                     # print(weight_check)
 
         print("Finish Training")
+
 
     def act(self, state, greedy = True):
         pi = self._sess.run(self._pi, feed_dict={self._state: [state]})
@@ -126,6 +151,9 @@ class PolicyNetwork:
             return np.argmax(pi, axis = -1)
         else:
             return np.random.choice(self._act_dim, p = pi[0])
+
+    def array_map(self, f, array):
+        return np.array(list(map(f, array)))
 
 
 
