@@ -13,7 +13,6 @@ class PolicyNetwork:
         self._state_dim = state_dim
         self._discount = discount
 
-
         self._state = tf.placeholder(dtype = tf.float32, shape = [None, state_dim])
         self._W1 = tf.get_variable(dtype = tf.float32, shape = [state_dim, 10], name = "W1")
         self._b1 = tf.get_variable(dtype = tf.float32, shape = [10], name = "b1")
@@ -50,8 +49,6 @@ class PolicyNetwork:
             # Sample trajectories
             for batch in range(batch_size):
                 state = self._env.reset()
-                # print(state)
-                # sum_reward = 0
                 cum_sum_reward = np.zeros(shape = (1, 1))
                 trajectory_grad = []
 
@@ -60,12 +57,10 @@ class PolicyNetwork:
                 discount = 1
                 for t in range(self._horizon):
                     if not done:
-                        # print([state])
                         pi = self._sess.run(
                             self._pi,
                             feed_dict = {self._state: [state]})
                         # Sample the action index:
-                        # print(pi)
                         action = np.random.choice(self._act_dim, p = pi[0])
                         # Compute log grad:
                         list_grad = self._sess.run(
@@ -80,24 +75,13 @@ class PolicyNetwork:
                         if t < self._horizon - 1 and not done:
                             cum_sum_reward = np.append(cum_sum_reward, [[0]], axis = 0)
                         survival_counter += 1
-                    # else:
-                    #     list_grad = [
-                    #         np.zeros(shape = (self._state_dim, 10)),
-                    #         np.zeros(shape=(10)),
-                    #         np.zeros(shape=(10, self._act_dim)),
-                    #         np.zeros(shape=(self._act_dim))
-                    #     ]
-                    #     trajectory_grad.append(list_grad)
-                    #     if t < self._horizon - 1:
-                    #         cum_sum_reward = np.append(cum_sum_reward, [[0]], axis = 0)
+
                 survival_list.append(survival_counter)
                 print("survival " + str(survival_counter))
 
                 cum_sum_reward = (cum_sum_reward - np.mean(cum_sum_reward)) / np.std(cum_sum_reward)
                 batch_cum_sum_reward.append(cum_sum_reward)
                 trajectory_grad = np.array(trajectory_grad)
-                # print(trajectory_grad)
-                # trajectory_grad = np.sum(trajectory_grad, axis = 0)
                 trajectory_batch_grad.append(trajectory_grad)
 
             mean_survive = np.mean(survival_list)
@@ -129,7 +113,6 @@ class PolicyNetwork:
             trajectory_batch_grad = self.array_map(lambda x: np.sum(x, axis = 0), trajectory_batch_grad)
 
             trajectory_batch_grad = np.mean(trajectory_batch_grad, axis = 0)
-            # print(trajectory_batch_grad)
             assign_W1 = self._W1.assign(self._W1 + lr * trajectory_batch_grad[0])
             assign_b1 = self._b1.assign(self._b1 + lr * trajectory_batch_grad[1])
             assign_W2 = self._W2.assign(self._W2 + lr * trajectory_batch_grad[2])
@@ -138,17 +121,13 @@ class PolicyNetwork:
 
             self._sess.run(assigns)
 
-            # weight_check = self._sess.run(self._weights)
-
-                    # print(weight_check)
-
         print("Finish Training")
 
 
     def act(self, state, greedy = True):
         pi = self._sess.run(self._pi, feed_dict={self._state: [state]})
         if greedy:
-            return np.argmax(pi, axis = -1)
+            return np.argmax(pi, axis = -1)[0]
         else:
             return np.random.choice(self._act_dim, p = pi[0])
 
